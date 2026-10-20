@@ -1,14 +1,13 @@
-# Structures and tensors are unpublished design data and are NOT distributed
-# here. The pipeline rebuilds them from your own sources; see the README.
+# Design structures are unpublished data and are NOT distributed here.
+# The conditioning tensors in scaffolds/ ARE shipped: they hold only a
+# secondary-structure string and a block-adjacency matrix, no coordinates.
 *.pdb
 *.cif
-*.pt
 
 # Working directories the pipeline creates
 complexes/
 pool/
 library/
-scaffolds/
 synthetic_scaffolds/
 incoming/
 gapDesigns/
@@ -16,7 +15,7 @@ quarantine/
 revision/
 outputs/
 
-# Per-run tables and reports (regenerated; the committed copies live in docs/)
+# Per-run tables and reports
 inventory/
 *.html
 

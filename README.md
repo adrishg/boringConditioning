@@ -1,30 +1,98 @@
-# boringConditioning
-
-![Helices are all you need](figures/banner_misscav_bell_curve.png)
+![Boring Conditioning — helix-bundle setup for RFdiffusion](figures/banner.png)
 
 > Banner adapted from a meme posted by **Martin Pacesa** on LinkedIn.
 > <!-- TODO: add the post URL -->
 
-Build a library of small helical-bundle scaffolds for **RFdiffusion fold
-conditioning**, from design structures you already have.
+**A ready-made scaffold set that makes RFdiffusion produce helical-bundle
+binders instead of whatever topology it feels like.**
 
-Instead of letting RFdiffusion pick topology freely and discarding everything
-that is not a 4-helix bundle, condition it up front so every design is one.
-"Boring" on purpose: predictable, well-behaved folds.
+Clone it, point RFdiffusion at `scaffolds/`, and every design comes out a
+3-, 4-, 5- or 6-helix bundle. "Boring" on purpose: predictable, well-behaved
+folds you can actually filter and build on.
 
-## What this repository is
+---
 
-**Tools, not structures.** No PDBs and no `.pt` tensors are distributed here —
-they are unpublished design data. What ships is the pipeline that turns a pile
-of design outputs into a deduplicated, length-indexed scaffold library.
+## What you actually need
 
-Point it at your own structures and it builds your own library.
+Fold conditioning reads exactly **two tensors per scaffold** and nothing else.
+Confirmed in RFdiffusion's source: it globs `scaffold_dir/*_ss.pt`, strips the
+suffix, and loads the matching `_adj.pt`. No PDB is ever opened from that
+directory.
 
-## What our library looks like
+| What | Where it comes from |
+|---|---|
+| `<name>_ss.pt`, `<name>_adj.pt` for each scaffold | **this repo** — `scaffolds/`, 374 pairs |
+| your target structure | you |
+| `<target>_ss.pt`, `<target>_adj.pt` | you, one command (below) |
+| hotspot residues on the target | you |
 
-For scale, the library this pipeline produced from our own design campaigns —
-**364 distinct folds**, one per structural cluster, every length from 54 to 102
-residues:
+Plus [RFdiffusion **v1**](https://github.com/RosettaCommons/RFdiffusion) and
+its `SE3nv` environment. That is the whole list.
+
+## Use it
+
+```bash
+git clone <this repo> boringConditioning
+```
+
+Make the two tensors for **your target** — one-off, same helper that made the
+scaffolds:
+
+```bash
+python $RFDIFFUSION/helper_scripts/make_secstruc_adj.py \
+    --input_pdb my_target.pdb --out_dir target_folds/
+```
+
+Then design:
+
+```bash
+$RFDIFFUSION/scripts/run_inference.py \
+    inference.output_prefix=out/binder \
+    inference.num_designs=100 \
+    scaffoldguided.scaffoldguided=True \
+    scaffoldguided.scaffold_dir=boringConditioning/scaffolds \
+    scaffoldguided.target_pdb=True \
+    scaffoldguided.target_path=my_target.pdb \
+    scaffoldguided.target_ss=target_folds/my_target_ss.pt \
+    scaffoldguided.target_adj=target_folds/my_target_adj.pt \
+    'ppi.hotspot_res=[A59,A83,A91]' \
+    scaffoldguided.mask_loops=False \
+    denoiser.noise_scale_ca=0.5 denoiser.noise_scale_frame=0.5
+```
+
+Each design picks a scaffold at random, so the output is a mix of lengths and
+helix counts. Three things worth knowing:
+
+- **`target_ss` / `target_adj` default to `null` and are optional** — it runs
+  without them, but the Baker lab recommends supplying them for PPI, and they
+  cost one command.
+- **`mask_loops` defaults to `True`.** Set it `False` to get the scaffold's
+  exact length; leave it `True` only if you want loop lengths to vary.
+- With 374 scaffolds and fewer designs you will see *"Scaffold set is bigger
+  than num_designs"*. That is expected, not an error — it samples randomly, so
+  not every scaffold gets used. Add `scaffoldguided.systematic=True` to walk
+  the list in order instead.
+
+### Choosing a subset
+
+Scaffold names carry everything: `4h_067res_c03` is a 4-helix bundle, 67
+residues, cluster 3. Filter them into a list and pass it:
+
+```bash
+# only 4-helix bundles of 60-70 residues
+ls scaffolds/*_ss.pt | sed 's|.*/||; s|_ss\.pt$||' \
+  | awk -F'[_r]' '$1=="4h" && $2>=60 && $2<=70' > subset.txt
+
+scaffoldguided.scaffold_list=subset.txt
+```
+
+---
+
+## What you get
+
+`scaffolds/` holds **374 scaffolds** as `<name>_ss.pt` + `<name>_adj.pt` pairs.
+Each is one *distinct fold* — duplicates were removed by structural
+clustering, so 374 files mean 374 different shapes, not 374 near-copies.
 
 | Topology | Folds |
 |---|---|
@@ -33,7 +101,7 @@ residues:
 | 5-helix | 103 |
 | 6-helix | 14 |
 
-4-helix bundles per length, 54–102 res — no gaps from 58 up:
+Lengths span **54–102 residues**, with no gaps in the 4-helix set from 58 up:
 
 ```
 54:1   57:1   58:5   59:4   60:5   61:6   62:6   63:4   64:6   65:5
@@ -43,183 +111,73 @@ residues:
 96:6   97:7   98:12  99:3   100:4
 ```
 
-Those 364 folds came from 2,177 usable structures — the rest were redundant.
+### Why there are no PDB files here
 
-## Requirements
+Fold conditioning never reads a scaffold's coordinates. It reads two tensors:
+a per-residue secondary-structure string and a matrix of which helices touch.
+That is all `scaffolds/` contains — topology, no structures. The design models
+they were derived from are unpublished and stay private, and you do not need
+them to use this.
+
+### Honest limits
+
+- **RFdiffusion v1 only.** v2 documents motif scaffolding and never mentions
+  fold conditioning; v3's input spec answers *"Can I guide on secondary
+  structure?"* with *"Currently no"*.
+- A scaffold fixes the **design length**. Nothing below 54 residues is
+  reachable. To hit a length between scaffolds, let the model insert residues
+  (`scaffoldguided.mask_loops=True scaffoldguided.sampled_insertion=15
+  scaffoldguided.sampled_N=5 scaffoldguided.sampled_C=5`) — but that only ever
+  *adds*, so the shortest scaffold is a hard floor.
+- Scaffolds came from several design campaigns and vary in how well they were
+  validated. Most passed AlphaFold multimer filtering; some are raw design
+  backbones kept because they were the only fold at their length. They are
+  conditioning templates, not validated binders.
+
+---
+
+## Build your own
+
+Everything above was produced by the pipeline in `scripts/`. Run it on your own
+design outputs to extend this set or build a different one.
 
 ```bash
 conda create -n boring python=3.11 -c conda-forge mdtraj numpy matplotlib
 conda activate boring
 ```
 
-Plus, for the clustering and conversion steps:
+Also needed: [foldseek](https://github.com/steineggerlab/foldseek) for
+clustering, and RFdiffusion for the final conversion.
 
-- [foldseek](https://github.com/steineggerlab/foldseek) — structural clustering
-- [RFdiffusion](https://github.com/RosettaCommons/RFdiffusion) — its
-  `helper_scripts/make_secstruc_adj.py` writes the tensors, and its `SE3nv`
-  environment runs them
+| Step | Command |
+|---|---|
+| 1. Pull in designs that passed your filters | `scripts/harvest_complexes.py` |
+| 2. Extract the binder chain | `scripts/get_chain.py` |
+| 3. Inventory topology and geometry | `scripts/inventory.py` |
+| 4. Cluster, keep one per fold | `scripts/cluster_scaffolds.py` |
+| 5. Record provenance | `scripts/make_library_manifest.py` |
+| 6. Convert to tensors | `cluster/1-make_secstruc_adj.sbatch` |
 
-`mkdssp` is optional; secondary structure defaults to mdtraj's Kabsch–Sander,
-which agrees with mkdssp 4.6 residue-for-residue on these backbones.
+Each script has `--help` and a docstring explaining the non-obvious choices.
+Two worth knowing before you start:
 
-## Quick start
+**Step 1 is fiddlier than it looks.** Design pipelines rename files after
+scoring, so the score table's filename column usually matches nothing on disk.
+`--name-template` rebuilds the disk name from the other columns; use
+`--dry-run` first.
 
-```bash
-git clone <this repo> boringConditioning
-cd boringConditioning
-conda activate boring
-```
+**Step 4 is where a library's real size appears.** Clustering runs per
+(topology, length) — a scaffold is only interchangeable with another of the
+same length — using foldseek TM-score rather than RMSD, because two
+same-length bundles can place their helix boundaries differently. Our 2,177
+usable structures collapsed to 374 folds, and one 180-design set turned out to
+be a single fold.
 
-### 1. Harvest the designs that passed your filters
+### Filling a length nothing reaches
 
-Most design pipelines rename files after scoring, so the score table rarely
-matches what is on disk. `--name-template` rebuilds the disk name from CSV
-columns; use `--dry-run` first to check it resolves.
-
-```bash
-python3 scripts/harvest_complexes.py \
-    --source-dir  <campaign>/multimer_results/models \
-    --score-csv   <campaign>/multimer_results/multimerTest_filtered.csv \
-    --name-template 'design__{backbone_id_seq}__multimer-af2__seed-{seed}__model-{model_num}__rank-{rank}.pdb' \
-    --output-dir  complexes/<batch> --binder-chain A --require-passed \
-    --prefix '<batch>__' --dry-run
-```
-
-For an already-curated folder with no score table, drop `--score-csv` and
-filter on length instead.
-
-### 2. Extract the binder chain
-
-```bash
-python3 scripts/get_chain.py --input-dir complexes/<batch> \
-    --output-dir pool/<batch> --chain A --min-res 40 --max-res 130
-```
-
-Reads PDB and mmCIF. Across every campaign we checked, the binder is chain A
-and the target is chain B.
-
-### 3. Inventory — topology, geometry, redundancy
-
-```bash
-python3 scripts/inventory.py --input-dir pool --output inventory/inventory.tsv
-```
-
-Deduplicates by md5, runs DSSP, counts helices, measures helix/loop lengths
-and packing, and classifies each structure `canonical` / `splayed` /
-`not_bundle`. Splayed bundles are usable: fold conditioning reads only the
-secondary structure and which helices touch.
-
-### 4. Cluster and keep one representative per fold
-
-```bash
-python3 scripts/cluster_scaffolds.py --tsv inventory/inventory.tsv \
-    --pool pool --out-dir library --clusters inventory/clusters.tsv
-```
-
-Clusters **within** each (topology, length) group — a scaffold is only
-interchangeable with another of the same length, because fold conditioning
-takes the design length from the tensors. Similarity is foldseek TM-score, not
-index-wise RMSD, since two same-length bundles can place their helix
-boundaries differently.
-
-This is where the real size of a library shows up. Ours went from 2,177 usable
-structures to **374 distinct folds**; one 180-design set collapsed to a single
-fold.
-
-### 5. Record provenance
-
-```bash
-python3 scripts/make_library_manifest.py --clusters inventory/clusters.tsv \
-    --inventory inventory/inventory.tsv --batches batches.tsv --library library
-```
-
-Writes `library/MANIFEST.tsv` with each scaffold's topology, cluster size and
-**validation status**, so a scaffold that never passed a filter is labelled as
-such rather than silently mixed in. Describe each source in `batches.tsv`.
-
-### 6. Convert to the tensors RFdiffusion reads
-
-On the cluster, inside the RFdiffusion environment:
-
-```bash
-sbatch cluster/1-make_secstruc_adj.sbatch [LIBRARY_DIR] [OUT_DIR]
-```
-
-One `_ss.pt` and one `_adj.pt` per scaffold. The script flattens the nested
-library, refuses to run on a filename collision, and fails if the output count
-does not match the input count — a partial conversion would otherwise leave
-you sampling from a smaller set than you think.
-
-### 7. Run fold conditioning
-
-```bash
-$RFDIFFUSION/scripts/run_inference.py \
-    inference.output_prefix=out/design \
-    scaffoldguided.scaffoldguided=True \
-    scaffoldguided.scaffold_dir=scaffolds/ \
-    scaffoldguided.target_pdb=True \
-    scaffoldguided.target_path=input_pdbs/target.pdb \
-    scaffoldguided.target_ss=target_folds/target_ss.pt \
-    scaffoldguided.target_adj=target_folds/target_adj.pt \
-    'ppi.hotspot_res=[A59,A83,A91]' \
-    scaffoldguided.mask_loops=False \
-    denoiser.noise_scale_ca=0.5 denoiser.noise_scale_frame=0.5
-```
-
-The **target needs its own** `_ss.pt` / `_adj.pt` from the same helper.
-`scaffoldguided.scaffold_list=list.txt` restricts a run to a subset — use it to
-exclude unvalidated scaffolds, or to pin one length.
-
-## Looking at what you built
-
-Optional, all reading the tables from the steps above:
-
-```bash
-python3 scripts/plot_inventory.py   --tsv inventory/inventory.tsv \
-    --output coverage.png --band 58 85 --topology 4 --bundles-only
-python3 scripts/plot_library.py     --clusters inventory/clusters.tsv \
-    --output library.png --band 58 85 --topology 4
-python3 scripts/plot_quality.py     --tsv inventory/inventory.tsv --output quality.png
-python3 scripts/plot_complexes.py   --complexes-dir complexes --output complexes.png
-```
-
-`plot_library.py` is the useful one: a topology-by-length grid of what you
-have, and how much of each group was redundant. `plot_source_survey.py` answers
-a different question — *should I harvest this at all?* — from a length sweep of
-a candidate source, before copying anything.
-
-## Checking whether unvalidated scaffolds are real
-
-Scaffolds that never passed a filter are still worth keeping if they are the
-only fold at their length, but it is worth knowing whether they are
-*designable*: does a sequence designed onto the backbone fold back to it?
-
-```bash
-bash cluster/3-revise-unvalidated.sh [SCAFFOLD_DIR] [OUT_DIR] [NUM_SEQS]
-```
-
-A submit wrapper, not a job — it chains sequence design and a monomer
-foldability test with an `afterok` dependency. It expects a binder-design
-pipeline providing those two steps; set `BINDER_REPO_DIR` to it. Run it on
-cluster representatives only, so nothing is spent re-checking folds that
-clustering already called redundant.
-
-## Filling lengths you do not have
-
-Fold conditioning sets the design length from the scaffold, so a length with no
-scaffold is a length you cannot design at. Two ways out.
-
-**Insertion sampling**, when the gap is *above* your shortest scaffold:
-
-```bash
-scaffoldguided.mask_loops=True scaffoldguided.sampled_insertion=15 \
-    scaffoldguided.sampled_N=5 scaffoldguided.sampled_C=5
-```
-
-**Synthetic conditioning tensors**, when it is below the floor and nothing
-exists. Fold conditioning never reads a scaffold's coordinates, only its
-secondary-structure string and block-adjacency matrix — so a real bundle's
-topology can be rescaled to a length that has no PDB:
+Because the tensors are just topology, you can write them directly: rescale a
+real bundle's measured secondary structure and adjacency to a length that has
+no structure, then condition on that.
 
 ```bash
 # workstation (needs mdtraj)
@@ -231,33 +189,34 @@ python3 scripts/make_synthetic_ss_adj.py --json topologies.json \
 sbatch cluster/2-design_missing_lengths.sbatch
 ```
 
-The two steps are split because reading a structure needs mdtraj and writing a
-`.pt` needs torch, and the two environments rarely have both.
+That is how the 58–66 scaffolds here were made. Expect roughly a third of
+designs to be usable at the shortest lengths, rising to about two thirds by 66
+— at 58 residues there is barely room for four helices and many collapse into
+a hairpin. Unconditional generation with a compactness potential does **not**
+work: it controls radius of gyration, not helix count.
 
-Expect roughly a third of designs to be usable at the shortest lengths, rising
-with length — at 58 residues there is barely room for four helices and many
-collapse into a two-helix hairpin. Unconditional generation with a compactness
-potential does **not** work here: it controls radius of gyration, not helix
-count.
+### Looking at what you built
 
-## Version support
-
-| Version | Fold conditioning |
-|---|---|
-| **RFdiffusion v1** | **Yes** — the only version this library works with |
-| RFdiffusion2 | No; its README documents motif scaffolding only |
-| RFdiffusion3 | No. Its input spec answers "Can I guide on secondary structure?" with "Currently no" |
-
-## Repository layout
-
-```
-scripts/    the pipeline, step by step (10 tools)
-cluster/    SLURM jobs (conversion, gap-filling design, revision)
-docs/       NOTES.md — what cost time when building one of these
-batches.tsv template for recording where each source batch came from
-figures/    banner and coverage plots
+```bash
+python3 scripts/plot_library.py   --clusters inventory/clusters.tsv --output library.png
+python3 scripts/plot_inventory.py --tsv inventory/inventory.tsv --output coverage.png
+python3 scripts/plot_quality.py   --tsv inventory/inventory.tsv --output quality.png
 ```
 
-`docs/NOTES.md` records the failure modes — mismatched score tables, corrupt
-coordinates that parse cleanly, clustering thresholds, why unconditional
-generation gives hairpins — so they do not have to be rediscovered.
+`plot_source_survey.py` answers a different question — *is this source worth
+harvesting?* — from a length sweep, before you copy anything.
+`cluster/3-revise-unvalidated.sh` chains sequence design and a monomer
+foldability test, to check whether an unvalidated backbone is designable.
+
+---
+
+## Layout
+
+```
+scaffolds/   374 ready-to-use conditioning tensors   <- the thing you want
+scripts/     the pipeline that built them
+cluster/     SLURM jobs (conversion, gap-filling, revision)
+docs/        NOTES.md — what cost time when building one of these
+batches.tsv  template for recording where each source batch came from
+figures/     banner and coverage plots
+```

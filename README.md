@@ -220,3 +220,11 @@ docs/        NOTES.md — what cost time when building one of these
 batches.tsv  template for recording where each source batch came from
 figures/     banner and coverage plots
 ```
+
+---
+
+<p align="center">
+  <sub>Built in the Yarov-Yarovoy Lab, University of California, Davis.</sub>
+  <br>
+  <sub>By Adriana Hernández-González</sub>
+</p>

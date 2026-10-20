@@ -1,0 +1,31 @@
+# Structures and tensors are unpublished design data and are NOT distributed
+# here. The pipeline rebuilds them from your own sources; see the README.
+*.pdb
+*.cif
+*.pt
+
+# Working directories the pipeline creates
+complexes/
+pool/
+library/
+scaffolds/
+synthetic_scaffolds/
+incoming/
+gapDesigns/
+quarantine/
+revision/
+outputs/
+
+# Per-run tables and reports (regenerated; the committed copies live in docs/)
+inventory/
+*.html
+
+# Cluster leftovers
+slurm-*.out
+slurm-*.err
+
+# Python / macOS
+__pycache__/
+*.pyc
+.DS_Store
+.provenance/

@@ -1,0 +1,4 @@
+batch	source	selection	validation	notes
+example_campaign	path/to/campaign/results	passed==True	multimer	ipTM and pLDDT ranges, and anything odd about this source
+example_curated	path/to/curated/folder	manual	curated	hand-picked or visually inspected; no score table
+example_raw	path/to/decoys	none	UNVALIDATED	raw design output, never tested; say why it was accepted anyway
